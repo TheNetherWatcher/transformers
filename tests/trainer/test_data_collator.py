@@ -456,6 +456,29 @@ class TestDataCollatorWithFlattening(DataCollatorTestMixin, unittest.TestCase):
         self.assertEqual(batch["max_length_k"], 7)
         self.assertEqual(batch["max_length_q"], 7)
 
+    def test_output_dtypes(self):
+        features = [
+            {"input_ids": [2**40, 2**40 + 1], "labels": [0, 2**40 + 2]},
+            {"input_ids": [3], "labels": [4]},
+        ]
+        for return_tensors in ["pt", "np"]:
+            collator = DataCollatorWithFlattening(
+                return_tensors=return_tensors,
+                return_flash_attn_kwargs=True,
+                return_seq_idx=True,
+                position_ids_start=2,
+            )
+            batch = collator(features)
+            for key in ["input_ids", "labels", "position_ids"]:
+                self.assertEqual(batch[key].dtype, torch.int64 if return_tensors == "pt" else np.int64)
+            for key in ["seq_idx", "cu_seq_lens_q", "cu_seq_lens_k"]:
+                self.assertEqual(batch[key].dtype, torch.int32 if return_tensors == "pt" else np.int32)
+            self.assertEqual(batch["input_ids"].tolist(), [[2**40, 2**40 + 1, 3]])
+            self.assertEqual(batch["labels"].tolist(), [[-100, 2**40 + 2, -100]])
+            self.assertEqual(batch["position_ids"].tolist(), [[2, 3, 2]])
+            self.assertIsInstance(batch["max_length_q"], int)
+            self.assertIsInstance(batch["max_length_k"], int)
+
     def test_immutability(self):
         """Test that flattening does not mutate input data."""
         for return_tensors in ["pt", "np"]:

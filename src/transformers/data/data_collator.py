@@ -1348,9 +1348,11 @@ class DataCollatorWithFlattening(DefaultDataCollator):
             else:
                 batch["labels"] += [separator_id] + input_ids[1:]
             if self.return_position_ids:
-                batch["position_ids"] += [self.position_ids_start + i for i in range(len(input_ids))]
+                batch["position_ids"].append(
+                    np.arange(self.position_ids_start, self.position_ids_start + len(input_ids), dtype=np.int64)
+                )
             if self.return_seq_idx:
-                batch["seq_idx"] += [seq_idx for _ in range(len(input_ids))]
+                batch["seq_idx"].append(np.full(len(input_ids), seq_idx, dtype=np.int32))
             if self.return_flash_attn_kwargs:
                 cu_seq_lens.append(cu_seq_lens[-1] + len(input_ids))
                 max_length = max(max_length, len(input_ids))
@@ -1363,21 +1365,18 @@ class DataCollatorWithFlattening(DefaultDataCollator):
         if return_tensors == "pt":
             import torch
 
-            data_cls = torch.tensor
-            dtype_64 = torch.int64
-            dtype_32 = torch.int32
-        elif return_tensors == "np":
-            data_cls = np.array
-            dtype_64 = np.int64
-            dtype_32 = np.int32
-        else:
+        elif return_tensors != "np":
             raise ValueError(f'return_tensors must be one of ("pt", "np"), {return_tensors=} not supported')
 
         for k, v in batch.items():
+            if k in ("position_ids", "seq_idx"):
+                v = np.concatenate(v)
             if k in self._batch_dim_keys:
                 v = [v]
             # Flash attention max_len_{q,k} are python ints
             if k not in self._py_int_keys:
-                batch[k] = data_cls(v, dtype=dtype_64 if k in self._int_64_keys else dtype_32)
+                batch[k] = np.array(v, dtype=np.int64 if k in self._int_64_keys else np.int32)
+                if return_tensors == "pt":
+                    batch[k] = torch.as_tensor(batch[k])
 
         return batch
